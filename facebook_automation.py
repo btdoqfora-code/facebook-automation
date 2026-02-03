@@ -399,14 +399,15 @@ def post_to_facebook(message, image_url=None):
     
     try:
         if image_url:
-            # Step 1: Upload the photo (unpublished) to get a photo ID
-            upload_url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/photos"
+            # Step 1: Upload the photo as unpublished to get a photo ID
+            upload_url = f"https://graph.facebook.com/v24.0/{FACEBOOK_PAGE_ID}/photos"
             upload_payload = {
                 'url': image_url,
-                'published': 'false',  # Don't publish yet
+                'published': 'false',
                 'access_token': FACEBOOK_ACCESS_TOKEN
             }
             
+            print("   📸 Uploading photo (unpublished)...")
             upload_response = requests.post(upload_url, data=upload_payload)
             upload_response.raise_for_status()
             photo_id = upload_response.json().get('id')
@@ -415,14 +416,16 @@ def post_to_facebook(message, image_url=None):
                 print("⚠️ Could not upload photo, posting without image")
                 image_url = None  # Fall through to text-only post
             else:
-                # Step 2: Publish the feed post with the photo attached
-                feed_url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
+                print(f"   📸 Photo uploaded, ID: {photo_id}")
+                # Step 2: Post to /feed with the photo attached using indexed param format
+                feed_url = f"https://graph.facebook.com/v24.0/{FACEBOOK_PAGE_ID}/feed"
                 feed_payload = {
                     'message': message,
-                    'attached_media': json.dumps([{'media_fbid': photo_id}]),
+                    'attached_media[0][media_fbid]': photo_id,
                     'access_token': FACEBOOK_ACCESS_TOKEN
                 }
                 
+                print("   📤 Publishing to feed with attached photo...")
                 response = requests.post(feed_url, data=feed_payload)
                 response.raise_for_status()
                 result = response.json()
@@ -431,7 +434,7 @@ def post_to_facebook(message, image_url=None):
         
         # Text-only post (no image)
         if not image_url:
-            url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
+            url = f"https://graph.facebook.com/v24.0/{FACEBOOK_PAGE_ID}/feed"
             payload = {
                 'message': message,
                 'access_token': FACEBOOK_ACCESS_TOKEN
