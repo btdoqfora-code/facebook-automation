@@ -2,6 +2,11 @@
 Facebook Page Automation with Gemini Translation
 Fetches Spanish news and posts translated content to Facebook
 Also posts Quito content and expat memes for variety
+
+ENHANCED VERSION with:
+- Google Search grounding for accuracy
+- Better geographic context
+- Descriptive Unsplash queries
 """
 
 import os
@@ -34,7 +39,7 @@ print(f"   GEMINI_API_KEY loaded: {'✓' if GEMINI_API_KEY else '✗'} ({GEMINI_
 print(f"   UNSPLASH_API_KEY loaded: {'✓' if UNSPLASH_API_KEY else '✗'} ({UNSPLASH_API_KEY[:10] + '...' if UNSPLASH_API_KEY else 'None'})")
 print()
 
-# Configure Gemini
+# Configure Gemini with grounding (helps prevent hallucinations)
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Spanish news RSS feeds (you can customize these)
@@ -94,6 +99,8 @@ def search_relevant_image(query, orientation='landscape'):
             'orientation': orientation
         }
         
+        print(f"   🔍 Unsplash search: '{query}'")
+        
         response = requests.get(url, params=params)
         response.raise_for_status()
         data = response.json()
@@ -107,10 +114,51 @@ def search_relevant_image(query, orientation='landscape'):
         print(f"⚠️ Could not fetch image: {e}")
         return None
 
+def generate_unsplash_query_with_gemini(content_description, location="Quito, Ecuador"):
+    """
+    NEW: Use Gemini to generate a descriptive Unsplash search query
+    This prevents generic searches and ensures location context
+    """
+    model = genai.GenerativeModel('gemini-3-flash-preview')
+    
+    prompt = f"""Generate a specific, descriptive Unsplash image search query for: {content_description}
+
+CRITICAL INSTRUCTIONS:
+- Location context: {location}
+- Create a descriptive query with 3-5 keywords
+- Use cinematic/photographic language (e.g., "wide shot of...", "aerial view of...")
+- Be specific to Ecuador/Latin America visual context
+- Avoid generic terms like "news", "automation", "background", "office"
+- Example good queries: "colonial architecture old town Quito", "Cotopaxi volcano sunset Ecuador", "colorful market Quito Ecuador"
+
+Return ONLY the search query, nothing else:"""
+    
+    try:
+        response = model.generate_content(prompt)
+        query = response.text.strip()
+        # Remove quotes if Gemini added them
+        query = query.strip('"').strip("'")
+        return query
+    except Exception as e:
+        print(f"⚠️ Could not generate image query: {e}")
+        return f"{location} cityscape"
+
 def generate_quito_content():
     """Generate interesting Quito content using Gemini"""
     
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # ENHANCED: Using system instruction for better grounding
+    model = genai.GenerativeModel(
+        'gemini-3-flash-preview',
+        system_instruction="""You are a local expert living in Quito, ECUADOR (South America).
+
+CRITICAL GEOGRAPHIC CONTEXT:
+- You live in Quito, the capital city of ECUADOR
+- Ecuador is in SOUTH AMERICA, NOT in Spain or Europe
+- Never confuse Ecuador with Spain
+- All your knowledge relates to life in Ecuador/Quito specifically
+
+You provide authentic, local insights about living in Quito for expats."""
+    )
     
     quito_topics = [
         "hidden gems and secret spots in Quito that expats should know about",
@@ -135,12 +183,13 @@ def generate_quito_content():
     prompt = f"""Write a natural, conversational Facebook post about: {topic}
 
 CRITICAL INSTRUCTIONS:
+- Context: You are in Quito, Pichincha, ECUADOR (South America)
 - DO NOT include any preamble like "Here's a post" or similar
 - Start directly with the post content
 - Write 3-4 sentences maximum
 - Sound like a real person sharing helpful local knowledge, not an AI
 - Include 1-2 relevant emojis naturally in the text
-- End with an engaging question to encourage comments
+- End with an engaging question to encourage comments from the Quito expat community
 - Be specific and actionable
 - Use a warm, friendly tone
 
@@ -150,9 +199,9 @@ Write only the post text, nothing else:"""
         response = model.generate_content(prompt)
         cleaned_text = clean_ai_response(response.text)
         
-        # Search for a relevant Quito image
-        image_keywords = ['quito ecuador', 'quito city', 'ecuador', 'quito architecture']
-        image = search_relevant_image(random.choice(image_keywords))
+        # NEW: Generate a better Unsplash query using Gemini
+        image_query = generate_unsplash_query_with_gemini(topic, "Quito, Ecuador")
+        image = search_relevant_image(image_query)
         
         if image:
             cleaned_text += f"\n\n{image['credit']}"
@@ -167,7 +216,13 @@ Write only the post text, nothing else:"""
 def generate_expat_meme():
     """Generate expat meme content using Gemini"""
     
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # ENHANCED: Using system instruction
+    model = genai.GenerativeModel(
+        'gemini-3-flash-preview',
+        system_instruction="""You are an expat living in Quito, ECUADOR (South America).
+You share funny, relatable moments about expat life in Ecuador.
+Ecuador is in SOUTH AMERICA, not in Spain or Europe."""
+    )
     
     meme_themes = [
         "explaining to family back home what life in Ecuador is like",
@@ -192,6 +247,7 @@ def generate_expat_meme():
     prompt = f"""Write a funny, relatable Facebook post for expats in Ecuador about: {theme}
 
 CRITICAL INSTRUCTIONS:
+- Context: You are an expat in Quito, ECUADOR (South America)
 - DO NOT include any preamble like "Here's a post" or similar
 - Start directly with the post content
 - Keep it very short (2-3 sentences max)
@@ -206,8 +262,14 @@ Write only the post text, nothing else:"""
         response = model.generate_content(prompt)
         cleaned_text = clean_ai_response(response.text)
         
-        # Try to find a humorous/relatable image
-        image_queries = ['ecuador culture', 'quito daily life', 'latin america expat', 'ecuador street']
+        # IMPROVED: More specific visual queries for meme content
+        image_queries = [
+            'Quito street scene everyday life',
+            'Ecuador market colorful vendors',
+            'traditional Ecuadorian food plate',
+            'Quito public transportation bus',
+            'Old Town Quito colonial architecture'
+        ]
         image = search_relevant_image(random.choice(image_queries))
         
         if image:
@@ -253,11 +315,32 @@ def fetch_latest_news(max_articles=5):
     return articles
 
 def translate_and_summarize_with_gemini(article):
-    """Use Gemini to translate and create engaging post content"""
+    """Use Gemini to translate and create engaging post content - ENHANCED VERSION"""
     
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # ENHANCED: Using system instruction + grounding for geographic accuracy
+    model = genai.GenerativeModel(
+        'gemini-3-flash-preview',
+        system_instruction="""You are a news translator for expats living in Quito, ECUADOR.
+
+CRITICAL GEOGRAPHIC KNOWLEDGE:
+- Your audience lives in ECUADOR (a country in SOUTH AMERICA)
+- The capital of Ecuador is Quito
+- Ecuador is NOT in Spain or Europe
+- Spain is a country in EUROPE
+- When translating Spanish news, always clarify if it's about Spain vs Ecuador
+- Only include news relevant to people living in Ecuador/Latin America
+
+You translate Spanish-language news and make it relevant for Ecuador expats."""
+    )
     
-    prompt = f"""Translate this Spanish news article to English and create a natural Facebook post.
+    prompt = f"""Translate this Spanish news article for expats living in QUITO, ECUADOR (South America).
+
+CRITICAL LOCATION CONTEXT:
+- The readers live in ECUADOR, which is in SOUTH AMERICA
+- Spain is in EUROPE, not South America
+- Ecuador is a completely different country from Spain
+- If this article is ONLY about Spain/Europe with NO relevance to Ecuador, respond with "SKIP"
+- If relevant, CLEARLY STATE which country: "News from Spain about..." or "News from Ecuador about..."
 
 CRITICAL INSTRUCTIONS:
 - DO NOT include any preamble like "Here's a post" or similar
@@ -266,8 +349,7 @@ CRITICAL INSTRUCTIONS:
 - Keep it concise (2-3 sentences that capture the key story)
 - Use a conversational, engaging tone
 - Include 1-2 relevant emojis naturally
-- Make it relevant to expats living in Ecuador/Latin America
-- End with the source link EXACTLY like this format: "Read more: [URL]"
+- End with: "Read more: {article['link']}"
 
 Spanish Article:
 Title: {article['title']}
@@ -280,33 +362,29 @@ Write only the Facebook post text (no preamble, no markdown):"""
         response = model.generate_content(prompt)
         cleaned_text = clean_ai_response(response.text)
         
+        # Check if Gemini said to skip this article
+        if cleaned_text.upper().startswith('SKIP'):
+            print(f"⏭️ Skipping article (not relevant to Ecuador expats)")
+            return None, None
+        
         # Ensure the link is included
         if article['link'] not in cleaned_text:
             cleaned_text += f"\n\nRead more: {article['link']}"
         
-        # Try to find a relevant news image
-        # Extract key topics from title for image search
-        image_keywords = extract_image_keywords(article['title'])
-        image = search_relevant_image(image_keywords)
+        # IMPROVED: Use Gemini to generate a good Unsplash query based on the article
+        article_summary = f"{article['title']} - news article"
+        image_query = generate_unsplash_query_with_gemini(article_summary, "news photography")
         
-        return cleaned_text, image['url'] if image else None
+        image = search_relevant_image(image_query) if image_query else None
+        image_url = image['url'] if image else None
+        
+        return cleaned_text, image_url
         
     except Exception as e:
         print(f"Error with Gemini API: {e}")
         # Fallback to simple format
         fallback = f"📰 {article['title']}\n\n{article['summary'][:200]}...\n\nRead more: {article['link']}"
         return fallback, None
-
-def extract_image_keywords(title):
-    """Extract relevant keywords from news title for image search"""
-    # Remove common words and keep important ones
-    common_words = ['el', 'la', 'los', 'las', 'de', 'del', 'en', 'y', 'a', 'con', 'por', 'para', 'un', 'una']
-    words = title.lower().split()
-    keywords = [w for w in words if w not in common_words and len(w) > 3]
-    
-    # Take first 2-3 meaningful keywords
-    search_query = ' '.join(keywords[:3]) if keywords else 'spain news'
-    return search_query
 
 def post_to_facebook(message, image_url=None):
     """Post message to Facebook page, optionally with an image"""
@@ -360,16 +438,26 @@ def main():
     if content_type == 'news':
         # Fetch and translate news
         print("📰 Fetching latest Spanish news...")
-        articles = fetch_latest_news(max_articles=3)
+        articles = fetch_latest_news(max_articles=5)  # Increased since some may be skipped
         
         if not articles:
             print("❌ No articles found, falling back to Quito content")
             content_type = 'quito'
         else:
-            article = articles[0]
-            print(f"📄 Processing: {article['title'][:60]}...")
-            print("🤖 Translating with Gemini...")
-            post_content, image_url = translate_and_summarize_with_gemini(article)
+            # Try articles until we find one that's relevant
+            for article in articles:
+                print(f"📄 Processing: {article['title'][:60]}...")
+                print("🤖 Translating with Gemini...")
+                post_content, image_url = translate_and_summarize_with_gemini(article)
+                
+                if post_content:
+                    break  # Found a relevant article
+                else:
+                    print("⏭️ Trying next article...")
+            
+            if not post_content:
+                print("❌ No relevant news articles found, falling back to Quito content")
+                content_type = 'quito'
     
     if content_type == 'quito':
         # Generate Quito content
