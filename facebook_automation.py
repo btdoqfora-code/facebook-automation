@@ -11,11 +11,25 @@ from datetime import datetime
 import feedparser
 import google.generativeai as genai
 import random
+from dotenv import load_dotenv
+
+# Load variables from .env file automatically
+load_dotenv()
+
+# Debug: Check if .env loaded
+print("🔍 Debug: Checking environment variables...")
+print(f"   .env file exists in current directory: {os.path.exists('.env')}")
 
 # Configuration from environment variables
 FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID')
 FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+
+# Debug output
+print(f"   FACEBOOK_PAGE_ID loaded: {'✓' if FACEBOOK_PAGE_ID else '✗'} ({FACEBOOK_PAGE_ID[:10] + '...' if FACEBOOK_PAGE_ID else 'None'})")
+print(f"   FACEBOOK_ACCESS_TOKEN loaded: {'✓' if FACEBOOK_ACCESS_TOKEN else '✗'} ({FACEBOOK_ACCESS_TOKEN[:10] + '...' if FACEBOOK_ACCESS_TOKEN else 'None'})")
+print(f"   GEMINI_API_KEY loaded: {'✓' if GEMINI_API_KEY else '✗'} ({GEMINI_API_KEY[:10] + '...' if GEMINI_API_KEY else 'None'})")
+print()
 
 # Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -37,7 +51,7 @@ CONTENT_TYPES = {
 def generate_quito_content():
     """Generate interesting Quito content using Gemini"""
     
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     quito_topics = [
         "hidden gems and secret spots in Quito that expats should know about",
@@ -82,7 +96,7 @@ Create the post:
 def generate_expat_meme():
     """Generate expat meme content using Gemini"""
     
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     meme_themes = [
         "explaining to family back home what life in Ecuador is like",
@@ -193,7 +207,7 @@ def fetch_latest_news(max_articles=5):
 def translate_and_summarize_with_gemini(article):
     """Use Gemini to translate and create engaging post content"""
     
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
 You are helping create engaging Facebook posts for an expat community page. 
@@ -225,16 +239,14 @@ def post_to_facebook(message, image_url=None):
     """Post message to Facebook page, optionally with an image"""
     
     if image_url:
-        # Post with image
-        url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/photos"
+        url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/photos"
         payload = {
             'message': message,
             'url': image_url,
             'access_token': FACEBOOK_ACCESS_TOKEN
         }
     else:
-        # Text-only post
-        url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/feed"
+        url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
         payload = {
             'message': message,
             'access_token': FACEBOOK_ACCESS_TOKEN
