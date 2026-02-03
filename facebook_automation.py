@@ -387,28 +387,62 @@ Write only the Facebook post text (no preamble, no markdown):"""
         return fallback, None
 
 def post_to_facebook(message, image_url=None):
-    """Post message to Facebook page, optionally with an image"""
+    """Post message to Facebook page, optionally with an image
     
-    if image_url:
-        url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/photos"
-        payload = {
-            'message': message,
-            'url': image_url,
-            'access_token': FACEBOOK_ACCESS_TOKEN
-        }
-    else:
-        url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
-        payload = {
-            'message': message,
-            'access_token': FACEBOOK_ACCESS_TOKEN
-        }
+    IMPORTANT: For posts WITH images, we use a two-step process:
+    1. Upload the photo (unpublished) to get a photo ID
+    2. Publish the feed post with the photo attached
+    
+    This ensures posts appear in the main Posts feed with full-size images,
+    not just in the Photos section.
+    """
     
     try:
-        response = requests.post(url, data=payload)
-        response.raise_for_status()
-        result = response.json()
-        print(f"✅ Successfully posted to Facebook! Post ID: {result.get('id') or result.get('post_id')}")
-        return True
+        if image_url:
+            # Step 1: Upload the photo (unpublished) to get a photo ID
+            upload_url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/photos"
+            upload_payload = {
+                'url': image_url,
+                'published': 'false',  # Don't publish yet
+                'access_token': FACEBOOK_ACCESS_TOKEN
+            }
+            
+            upload_response = requests.post(upload_url, data=upload_payload)
+            upload_response.raise_for_status()
+            photo_id = upload_response.json().get('id')
+            
+            if not photo_id:
+                print("⚠️ Could not upload photo, posting without image")
+                image_url = None  # Fall through to text-only post
+            else:
+                # Step 2: Publish the feed post with the photo attached
+                feed_url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
+                feed_payload = {
+                    'message': message,
+                    'attached_media': json.dumps([{'media_fbid': photo_id}]),
+                    'access_token': FACEBOOK_ACCESS_TOKEN
+                }
+                
+                response = requests.post(feed_url, data=feed_payload)
+                response.raise_for_status()
+                result = response.json()
+                print(f"✅ Successfully posted to Facebook with image! Post ID: {result.get('id')}")
+                return True
+        
+        # Text-only post (no image)
+        if not image_url:
+            url = f"https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed"
+            payload = {
+                'message': message,
+                'access_token': FACEBOOK_ACCESS_TOKEN
+            }
+            
+            response = requests.post(url, data=payload)
+            response.raise_for_status()
+            result = response.json()
+            print(f"✅ Successfully posted to Facebook! Post ID: {result.get('id')}")
+            return True
+            
     except requests.exceptions.RequestException as e:
         print(f"❌ Error posting to Facebook: {e}")
         if hasattr(e.response, 'text'):
