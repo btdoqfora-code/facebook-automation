@@ -371,14 +371,9 @@ Write only the Facebook post text (no preamble, no markdown):"""
         if article['link'] not in cleaned_text:
             cleaned_text += f"\n\nRead more: {article['link']}"
         
-        # IMPROVED: Use Gemini to generate a good Unsplash query based on the article
-        article_summary = f"{article['title']} - news article"
-        image_query = generate_unsplash_query_with_gemini(article_summary, "news photography")
-        
-        image = search_relevant_image(image_query) if image_query else None
-        image_url = image['url'] if image else None
-        
-        return cleaned_text, image_url
+        # DON'T attach images to news posts - let Facebook generate link preview
+        # This ensures the article's own preview image/thumbnail shows up
+        return cleaned_text, None
         
     except Exception as e:
         print(f"Error with Gemini API: {e}")
