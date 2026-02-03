@@ -1,7 +1,7 @@
 name: Facebook News Automation
 
 on:
-schedule:
+  schedule:
     # Run 5 times per day (roughly every 4.8 hours)
     # Format: minute hour day month day-of-week
     - cron: '0 0,5,10,15,20 * * *'  # 12am, 5am, 10am, 3pm, 8pm UTC
