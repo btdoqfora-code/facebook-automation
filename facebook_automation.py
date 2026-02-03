@@ -61,6 +61,63 @@ CONTENT_TYPES = {
     'meme': 25,      # 25% chance - expat memes (increased from 20%)
 }
 
+# Track used images to avoid repetition
+USED_IMAGES_FILE = 'used_images.json'
+
+def load_group_images():
+    """Load manually curated group images library"""
+    try:
+        if os.path.exists('group_images.json'):
+            with open('group_images.json', 'r', encoding='utf-8') as f:
+                library = json.load(f)
+                print(f"✅ Loaded {library['total_images']} images from group library")
+                return library['images']
+    except Exception as e:
+        print(f"⚠️ Could not load group images: {e}")
+    return []
+
+def get_unused_group_image(group_images):
+    """Get a random image from the library that hasn't been used recently"""
+    if not group_images:
+        return None
+    
+    # Load list of recently used images
+    used_images = []
+    try:
+        if os.path.exists(USED_IMAGES_FILE):
+            with open(USED_IMAGES_FILE, 'r') as f:
+                used_images = json.load(f)
+    except:
+        pass
+    
+    # Filter out recently used images
+    available = [img for img in group_images if img['url'] not in used_images]
+    
+    # If all images have been used, reset the list
+    if not available:
+        print("♻️ All images used, resetting...")
+        available = group_images
+        used_images = []
+    
+    # Pick a random available image
+    selected = random.choice(available)
+    
+    # Mark as used
+    used_images.append(selected['url'])
+    
+    # Keep only last 50% of library size in used list (to allow cycling)
+    max_used = max(5, len(group_images) // 2)
+    used_images = used_images[-max_used:]
+    
+    # Save updated used list
+    try:
+        with open(USED_IMAGES_FILE, 'w') as f:
+            json.dump(used_images, f)
+    except:
+        pass
+    
+    return selected
+
 def clean_ai_response(text):
     """Remove common AI preambles and clean up the response"""
     
@@ -204,7 +261,19 @@ Write only the post text, nothing else:"""
         response = model.generate_content(prompt)
         cleaned_text = clean_ai_response(response.text)
         
-        # NEW: Generate a better Unsplash query using Gemini
+        # PRIORITY 1: Try to use group images library
+        group_images = load_group_images()
+        if group_images:
+            selected_image = get_unused_group_image(group_images)
+            if selected_image:
+                print(f"   📸 Using group library image: {selected_image['post_message'][:50]}...")
+                # Add photo credit if description exists
+                if selected_image['post_message']:
+                    cleaned_text += f"\n\n📸 {selected_image['post_message']}"
+                return cleaned_text, selected_image['url']
+        
+        # FALLBACK: Use Unsplash if no group images available
+        print("   🔍 No group images available, using Unsplash...")
         image_query = generate_unsplash_query_with_gemini(topic, "Quito, Ecuador")
         image = search_relevant_image(image_query)
         
@@ -267,7 +336,19 @@ Write only the post text, nothing else:"""
         response = model.generate_content(prompt)
         cleaned_text = clean_ai_response(response.text)
         
-        # IMPROVED: More specific visual queries for meme content
+        # PRIORITY 1: Try to use group images library
+        group_images = load_group_images()
+        if group_images:
+            selected_image = get_unused_group_image(group_images)
+            if selected_image:
+                print(f"   📸 Using group library image: {selected_image['post_message'][:50]}...")
+                # Add photo credit if description exists
+                if selected_image['post_message']:
+                    cleaned_text += f"\n\n📸 {selected_image['post_message']}"
+                return cleaned_text, selected_image['url']
+        
+        # FALLBACK: Use Unsplash if no group images available
+        print("   🔍 No group images available, using Unsplash...")
         image_queries = [
             'Quito street scene everyday life',
             'Ecuador market colorful vendors',
@@ -398,7 +479,7 @@ Write only the Facebook post text (no preamble, no markdown):"""
         fallback = f"📰 {article['title']}\n\n{article['summary'][:200]}...\n\nRead more: {article['link']}"
         return fallback, None
 
-def post_to_facebook(message, image_url=None):
+def post_to_facebook(message, image_url=None, article_link=None):
     """Post message to Facebook page, optionally with an image
     
     IMPORTANT: For posts WITH images, we use a two-step process:
@@ -444,8 +525,26 @@ def post_to_facebook(message, image_url=None):
                 print(f"✅ Successfully posted to Facebook with image! Post ID: {result.get('id')}")
                 return True
         
-        # Text-only post (no image)
-        if not image_url:
+        # News post with link preview
+        if article_link and not image_url:
+            url = f"https://graph.facebook.com/v24.0/{FACEBOOK_PAGE_ID}/feed"
+            # Remove "Read more:" text since Facebook will show rich preview
+            message_clean = re.sub(r'\n*Read more:.*?https?://[^\s]+', '', message).strip()
+            payload = {
+                'message': message_clean,
+                'link': article_link,  # This triggers Facebook's link preview
+                'access_token': FACEBOOK_ACCESS_TOKEN
+            }
+            
+            print("   🔗 Publishing with link preview...")
+            response = requests.post(url, data=payload)
+            response.raise_for_status()
+            result = response.json()
+            print(f"✅ Successfully posted to Facebook with link preview! Post ID: {result.get('id')}")
+            return True
+        
+        # Text-only post (no image, no link)
+        if not image_url and not article_link:
             url = f"https://graph.facebook.com/v24.0/{FACEBOOK_PAGE_ID}/feed"
             payload = {
                 'message': message,
@@ -483,6 +582,7 @@ def main():
     
     post_content = None
     image_url = None
+    article_link = None  # Track article link for news posts
     
     if content_type == 'news':
         # Fetch and translate news
@@ -495,6 +595,7 @@ def main():
         else:
             # Try articles until we find one that's relevant
             for article in articles:
+                article_link = article['link']  # Save the article link
                 print(f"📄 Processing: {article['title'][:60]}...")
                 print("🤖 Translating with Gemini...")
                 post_content, image_url = translate_and_summarize_with_gemini(article)
@@ -532,12 +633,14 @@ def main():
     
     # Post to Facebook
     print("📤 Posting to Facebook...")
-    success = post_to_facebook(post_content, image_url)
+    success = post_to_facebook(post_content, image_url=image_url, article_link=article_link)
     
     if success:
         print(f"\n✅ Automation complete! Posted: {content_type}")
         if image_url:
             print("📸 Posted with image!")
+        if article_link:
+            print("🔗 Posted with link preview!")
     else:
         print(f"\n❌ Post failed")
 
