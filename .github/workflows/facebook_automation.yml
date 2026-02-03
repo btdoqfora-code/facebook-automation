@@ -1,11 +1,10 @@
 name: Facebook News Automation
 
 on:
-  schedule:
-    # Run every 6 hours (adjust as needed)
+schedule:
+    # Run 5 times per day (roughly every 4.8 hours)
     # Format: minute hour day month day-of-week
-    - cron: '0 */6 * * *'  # Every 6 hours
-    # - cron: '0 9,15,21 * * *'  # 9 AM, 3 PM, 9 PM UTC
+    - cron: '0 0,5,10,15,20 * * *'  # 12am, 5am, 10am, 3pm, 8pm UTC
   
   workflow_dispatch:  # Allows manual triggering from GitHub Actions tab
 
