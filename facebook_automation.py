@@ -42,18 +42,23 @@ print()
 # Configure Gemini with grounding (helps prevent hallucinations)
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Spanish news RSS feeds (you can customize these)
+# Spanish news RSS feeds - mix of international and Latin America sources
 NEWS_FEEDS = [
+    # International Spanish news
     'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada',
     'https://rss.elmundo.es/rss/mundo.xml',
     'https://e00-elmundo.uecdn.es/elmundo/rss/internacional.xml',
+    
+    # Latin America focused
+    'https://www.eluniverso.com/feed/',  # Ecuador
+    'https://www.bbc.com/mundo/topics/c2dwqd1zd70t.rss',  # BBC Latin America
 ]
 
 # Content types and their weights (probability of posting each type)
 CONTENT_TYPES = {
-    'news': 50,      # 50% chance - translated news
-    'quito': 30,     # 30% chance - Quito stories/photos
-    'meme': 20,      # 20% chance - expat memes
+    'news': 30,      # 30% chance - translated news (reduced from 50%)
+    'quito': 45,     # 45% chance - Quito stories/photos (increased from 30%)
+    'meme': 25,      # 25% chance - expat memes (increased from 20%)
 }
 
 def clean_ai_response(text):
@@ -339,16 +344,28 @@ CRITICAL LOCATION CONTEXT:
 - The readers live in ECUADOR, which is in SOUTH AMERICA
 - Spain is in EUROPE, not South America
 - Ecuador is a completely different country from Spain
-- If this article is ONLY about Spain/Europe with NO relevance to Ecuador, respond with "SKIP"
-- If relevant, CLEARLY STATE which country: "News from Spain about..." or "News from Ecuador about..."
+- SKIP CRITERIA - Respond with "SKIP" if this article is:
+  * Only about Spanish domestic politics (elections, government appointments, local laws)
+  * Only about Spanish celebrities or entertainment
+  * About European Union politics or regulations
+  * About Spain-only business or economic news
+  * NOT relevant to people living in Latin America/Ecuador
+- KEEP CRITERIA - Only translate if it's about:
+  * International news that affects multiple countries
+  * Latin America or Ecuador specifically
+  * Major world events (wars, disasters, global economics)
+  * Technology, science, or culture with global relevance
+  * Immigration, expat issues, or international relations
 
 CRITICAL INSTRUCTIONS:
+- If NOT relevant to Ecuador expats, respond ONLY with "SKIP"
 - DO NOT include any preamble like "Here's a post" or similar
 - Start directly with the post content
 - Write like a real person sharing interesting news, not an AI
 - Keep it concise (2-3 sentences that capture the key story)
 - Use a conversational, engaging tone
 - Include 1-2 relevant emojis naturally
+- ALWAYS mention the country/region: "News from [Country]:" or "In [Region]..."
 - End with: "Read more: {article['link']}"
 
 Spanish Article:
