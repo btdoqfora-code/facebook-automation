@@ -12,6 +12,7 @@ import feedparser
 import google.generativeai as genai
 import random
 from dotenv import load_dotenv
+import re
 
 # Load variables from .env file automatically
 load_dotenv()
@@ -24,11 +25,13 @@ print(f"   .env file exists in current directory: {os.path.exists('.env')}")
 FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID')
 FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+UNSPLASH_API_KEY = os.environ.get('UNSPLASH_API_KEY')
 
 # Debug output
 print(f"   FACEBOOK_PAGE_ID loaded: {'✓' if FACEBOOK_PAGE_ID else '✗'} ({FACEBOOK_PAGE_ID[:10] + '...' if FACEBOOK_PAGE_ID else 'None'})")
 print(f"   FACEBOOK_ACCESS_TOKEN loaded: {'✓' if FACEBOOK_ACCESS_TOKEN else '✗'} ({FACEBOOK_ACCESS_TOKEN[:10] + '...' if FACEBOOK_ACCESS_TOKEN else 'None'})")
 print(f"   GEMINI_API_KEY loaded: {'✓' if GEMINI_API_KEY else '✗'} ({GEMINI_API_KEY[:10] + '...' if GEMINI_API_KEY else 'None'})")
+print(f"   UNSPLASH_API_KEY loaded: {'✓' if UNSPLASH_API_KEY else '✗'} ({UNSPLASH_API_KEY[:10] + '...' if UNSPLASH_API_KEY else 'None'})")
 print()
 
 # Configure Gemini
@@ -47,6 +50,62 @@ CONTENT_TYPES = {
     'quito': 30,     # 30% chance - Quito stories/photos
     'meme': 20,      # 20% chance - expat memes
 }
+
+def clean_ai_response(text):
+    """Remove common AI preambles and clean up the response"""
+    
+    # Common preambles to remove
+    preambles = [
+        r"^here'?s?\s+an?\s+engaging\s+facebook\s+post.*?:",
+        r"^here'?s?\s+a\s+facebook\s+post.*?:",
+        r"^here'?s?\s+the\s+post.*?:",
+        r"^here'?s?\s+a\s+.*?post.*?:",
+        r"^here'?s?\s+the\s+.*?post.*?:",
+        r"^facebook\s+post.*?:",
+        r"^post.*?:",
+    ]
+    
+    cleaned = text.strip()
+    
+    # Remove preambles (case insensitive)
+    for preamble in preambles:
+        cleaned = re.sub(preamble, '', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Remove leading/trailing whitespace and newlines
+    cleaned = cleaned.strip()
+    
+    # Remove markdown code blocks if present
+    cleaned = re.sub(r'^```.*?\n', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'\n```$', '', cleaned, flags=re.MULTILINE)
+    
+    return cleaned
+
+def search_relevant_image(query, orientation='landscape'):
+    """Search for a relevant image using Unsplash API"""
+    
+    if not UNSPLASH_API_KEY:
+        return None
+    
+    try:
+        url = "https://api.unsplash.com/photos/random"
+        params = {
+            'query': query,
+            'client_id': UNSPLASH_API_KEY,
+            'orientation': orientation
+        }
+        
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        return {
+            'url': data['urls']['regular'],
+            'credit': f"📸 {data['user']['name']} on Unsplash",
+            'download_url': data['links']['download_location']
+        }
+    except Exception as e:
+        print(f"⚠️ Could not fetch image: {e}")
+        return None
 
 def generate_quito_content():
     """Generate interesting Quito content using Gemini"""
@@ -73,22 +132,34 @@ def generate_quito_content():
     
     topic = random.choice(quito_topics)
     
-    prompt = f"""
-Create an engaging Facebook post for an expat community page about: {topic}
+    prompt = f"""Write a natural, conversational Facebook post about: {topic}
 
-Requirements:
-- Write 3-4 sentences
-- Make it helpful, interesting, and actionable
-- Use a friendly, conversational tone
-- Include 1-2 relevant emojis
-- End with a question to encourage engagement
+CRITICAL INSTRUCTIONS:
+- DO NOT include any preamble like "Here's a post" or similar
+- Start directly with the post content
+- Write 3-4 sentences maximum
+- Sound like a real person sharing helpful local knowledge, not an AI
+- Include 1-2 relevant emojis naturally in the text
+- End with an engaging question to encourage comments
+- Be specific and actionable
+- Use a warm, friendly tone
 
-Create the post:
-"""
+Write only the post text, nothing else:"""
     
     try:
         response = model.generate_content(prompt)
-        return response.text.strip(), 'text'
+        cleaned_text = clean_ai_response(response.text)
+        
+        # Search for a relevant Quito image
+        image_keywords = ['quito ecuador', 'quito city', 'ecuador', 'quito architecture']
+        image = search_relevant_image(random.choice(image_keywords))
+        
+        if image:
+            cleaned_text += f"\n\n{image['credit']}"
+            return cleaned_text, image['url']
+        else:
+            return cleaned_text, None
+            
     except Exception as e:
         print(f"Error generating Quito content: {e}")
         return None, None
@@ -118,59 +189,36 @@ def generate_expat_meme():
     
     theme = random.choice(meme_themes)
     
-    prompt = f"""
-Create a funny, relatable Facebook post for expats living in Ecuador/Quito about: {theme}
+    prompt = f"""Write a funny, relatable Facebook post for expats in Ecuador about: {theme}
 
-Requirements:
-- Make it humorous and relatable
-- Keep it short (2-3 sentences max)
-- Use emojis appropriately
-- Be lighthearted and fun, never mean-spirited
-- Include a call-to-action like "Can anyone relate? 😂" or "Drop a 😂 if this is you"
+CRITICAL INSTRUCTIONS:
+- DO NOT include any preamble like "Here's a post" or similar
+- Start directly with the post content
+- Keep it very short (2-3 sentences max)
+- Sound like a real expat sharing a funny moment, not an AI
+- Use emojis naturally and appropriately
+- Be lighthearted and relatable, never mean-spirited
+- End with something like "Can you relate? 😂" or "Tell me I'm not alone 🤣"
 
-Create the funny post:
-"""
+Write only the post text, nothing else:"""
     
     try:
         response = model.generate_content(prompt)
-        return response.text.strip(), 'text'
+        cleaned_text = clean_ai_response(response.text)
+        
+        # Try to find a humorous/relatable image
+        image_queries = ['ecuador culture', 'quito daily life', 'latin america expat', 'ecuador street']
+        image = search_relevant_image(random.choice(image_queries))
+        
+        if image:
+            cleaned_text += f"\n\n{image['credit']}"
+            return cleaned_text, image['url']
+        else:
+            return cleaned_text, None
+            
     except Exception as e:
         print(f"Error generating meme content: {e}")
         return None, None
-
-def search_quito_image():
-    """Search for a beautiful Quito image using Unsplash API"""
-    
-    # Unsplash provides free images
-    # If you want to add images, get a free API key from https://unsplash.com/developers
-    unsplash_key = os.environ.get('UNSPLASH_API_KEY')
-    
-    if not unsplash_key:
-        return None
-    
-    try:
-        keywords = ['quito ecuador', 'quito city', 'quito architecture', 'ecuador landscape']
-        keyword = random.choice(keywords)
-        
-        url = f"https://api.unsplash.com/photos/random"
-        params = {
-            'query': keyword,
-            'client_id': unsplash_key,
-            'orientation': 'landscape'
-        }
-        
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        return {
-            'url': data['urls']['regular'],
-            'credit': f"📸 Photo by {data['user']['name']} on Unsplash",
-            'download_url': data['links']['download_location']
-        }
-    except Exception as e:
-        print(f"Error fetching Quito image: {e}")
-        return None
 
 def choose_content_type():
     """Randomly choose content type based on weights"""
@@ -209,31 +257,56 @@ def translate_and_summarize_with_gemini(article):
     
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    prompt = f"""
-You are helping create engaging Facebook posts for an expat community page. 
+    prompt = f"""Translate this Spanish news article to English and create a natural Facebook post.
 
-Translate this Spanish news article to English and create a Facebook post that:
-- Translates the key information accurately
-- Makes it relevant and interesting for expats
-- Keeps it concise (2-3 sentences)
-- Uses a friendly, conversational tone
-- Includes the original source link at the end
+CRITICAL INSTRUCTIONS:
+- DO NOT include any preamble like "Here's a post" or similar
+- Start directly with the post content
+- Write like a real person sharing interesting news, not an AI
+- Keep it concise (2-3 sentences that capture the key story)
+- Use a conversational, engaging tone
+- Include 1-2 relevant emojis naturally
+- Make it relevant to expats living in Ecuador/Latin America
+- End with the source link EXACTLY like this format: "Read more: [URL]"
 
 Spanish Article:
 Title: {article['title']}
-Summary: {article['summary']}
-Link: {article['link']}
+Content: {article['summary'][:500]}
+Source: {article['link']}
 
-Create an engaging Facebook post in English:
-"""
+Write only the Facebook post text (no preamble, no markdown):"""
     
     try:
         response = model.generate_content(prompt)
-        return response.text.strip()
+        cleaned_text = clean_ai_response(response.text)
+        
+        # Ensure the link is included
+        if article['link'] not in cleaned_text:
+            cleaned_text += f"\n\nRead more: {article['link']}"
+        
+        # Try to find a relevant news image
+        # Extract key topics from title for image search
+        image_keywords = extract_image_keywords(article['title'])
+        image = search_relevant_image(image_keywords)
+        
+        return cleaned_text, image['url'] if image else None
+        
     except Exception as e:
         print(f"Error with Gemini API: {e}")
-        # Fallback to simple translation
-        return f"📰 {article['title']}\n\n{article['summary'][:200]}...\n\nRead more: {article['link']}"
+        # Fallback to simple format
+        fallback = f"📰 {article['title']}\n\n{article['summary'][:200]}...\n\nRead more: {article['link']}"
+        return fallback, None
+
+def extract_image_keywords(title):
+    """Extract relevant keywords from news title for image search"""
+    # Remove common words and keep important ones
+    common_words = ['el', 'la', 'los', 'las', 'de', 'del', 'en', 'y', 'a', 'con', 'por', 'para', 'un', 'una']
+    words = title.lower().split()
+    keywords = [w for w in words if w not in common_words and len(w) > 3]
+    
+    # Take first 2-3 meaningful keywords
+    search_query = ' '.join(keywords[:3]) if keywords else 'spain news'
+    return search_query
 
 def post_to_facebook(message, image_url=None):
     """Post message to Facebook page, optionally with an image"""
@@ -294,38 +367,42 @@ def main():
             content_type = 'quito'
         else:
             article = articles[0]
-            print(f"📝 Processing: {article['title'][:50]}...")
+            print(f"📄 Processing: {article['title'][:60]}...")
             print("🤖 Translating with Gemini...")
-            post_content = translate_and_summarize_with_gemini(article)
+            post_content, image_url = translate_and_summarize_with_gemini(article)
     
     if content_type == 'quito':
         # Generate Quito content
         print("🏔️ Generating Quito content...")
-        post_content, content_format = generate_quito_content()
-        
-        # Try to add a Quito image (optional)
-        quito_image = search_quito_image()
-        if quito_image:
-            image_url = quito_image['url']
-            post_content += f"\n\n{quito_image['credit']}"
-            print(f"📸 Found Quito image!")
+        post_content, image_url = generate_quito_content()
     
     if content_type == 'meme':
         # Generate expat meme
         print("😂 Generating expat meme content...")
-        post_content, content_format = generate_expat_meme()
+        post_content, image_url = generate_expat_meme()
     
     if not post_content:
         print("❌ Failed to generate content")
         return
     
-    print(f"\n📄 Generated post:\n{post_content}\n")
+    print(f"\n📄 Generated post:")
+    print("="*60)
+    print(post_content)
+    print("="*60)
+    if image_url:
+        print(f"🖼️ Image URL: {image_url[:60]}...")
+    print()
     
     # Post to Facebook
     print("📤 Posting to Facebook...")
-    post_to_facebook(post_content, image_url)
+    success = post_to_facebook(post_content, image_url)
     
-    print(f"\n✅ Automation complete! Posted: {content_type}")
+    if success:
+        print(f"\n✅ Automation complete! Posted: {content_type}")
+        if image_url:
+            print("📸 Posted with image!")
+    else:
+        print(f"\n❌ Post failed")
 
 if __name__ == "__main__":
     main()
