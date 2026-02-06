@@ -77,7 +77,7 @@ def load_group_images():
     return []
 
 def get_unused_group_image(group_images):
-    """Get a random image from the library that hasn't been used recently"""
+    """Get a random image from the library that hasn't been used recently - IMPROVED"""
     if not group_images:
         return None
     
@@ -86,16 +86,21 @@ def get_unused_group_image(group_images):
     try:
         if os.path.exists(USED_IMAGES_FILE):
             with open(USED_IMAGES_FILE, 'r') as f:
-                used_images = json.load(f)
-    except:
-        pass
+                data = json.load(f)
+                # Handle both list and dict format for backwards compatibility
+                if isinstance(data, dict):
+                    used_images = data.get('group_images', [])
+                else:
+                    used_images = data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"⚠️ Could not load used images: {e}")
     
     # Filter out recently used images
     available = [img for img in group_images if img['url'] not in used_images]
     
-    # If all images have been used, reset the list
+    # If all images have been used, reset the list (start fresh cycle)
     if not available:
-        print("♻️ All images used, resetting...")
+        print("♻️ All group images used once, starting fresh cycle...")
         available = group_images
         used_images = []
     
@@ -105,16 +110,17 @@ def get_unused_group_image(group_images):
     # Mark as used
     used_images.append(selected['url'])
     
-    # Keep only last 50% of library size in used list (to allow cycling)
-    max_used = max(5, len(group_images) // 2)
-    used_images = used_images[-max_used:]
-    
-    # Save updated used list
+    # Save updated used list (keep ALL URLs until full cycle complete - no premature resetting!)
     try:
         with open(USED_IMAGES_FILE, 'w') as f:
-            json.dump(used_images, f)
-    except:
-        pass
+            json.dump({
+                'group_images': used_images,
+                'last_updated': datetime.now().isoformat(),
+                'cycle_progress': f"{len(used_images)}/{len(group_images)}"
+            }, f, indent=2)
+        print(f"   📝 Image tracking: {len(used_images)}/{len(group_images)} used in current cycle")
+    except Exception as e:
+        print(f"⚠️ Could not save tracking: {e}")
     
     return selected
 
@@ -178,39 +184,69 @@ def search_relevant_image(query, orientation='landscape'):
 
 def generate_unsplash_query_with_gemini(content_description, location="Quito, Ecuador"):
     """
-    NEW: Use Gemini to generate a descriptive Unsplash search query
-    This prevents generic searches and ensures location context
+    Use Gemini to generate varied, descriptive Unsplash search queries
     """
-    model = genai.GenerativeModel('gemini-3-flash-preview')
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    # Add variety by including different photographic styles each time
+    styles = [
+        "aerial view", "street photography", "golden hour", "architectural detail",
+        "wide angle", "close up", "panoramic", "vibrant colors", "sunset", 
+        "morning light", "urban landscape", "cultural scene", "market scene",
+        "traditional", "modern", "colonial architecture", "mountain backdrop"
+    ]
+    
+    random_style = random.choice(styles)
     
     prompt = f"""Generate a specific, descriptive Unsplash image search query for: {content_description}
 
 CRITICAL INSTRUCTIONS:
 - Location context: {location}
+- Photography style to incorporate: {random_style}
 - Create a descriptive query with 3-5 keywords
-- Use cinematic/photographic language (e.g., "wide shot of...", "aerial view of...")
+- Use cinematic/photographic language
 - Be specific to Ecuador/Latin America visual context
-- Avoid generic terms like "news", "automation", "background", "office"
-- Example good queries: "colonial architecture old town Quito", "Cotopaxi volcano sunset Ecuador", "colorful market Quito Ecuador"
+- Vary between: architecture, nature, culture, food, daily life, landmarks
+- Avoid generic terms like "news", "automation", "background"
+- Examples: 
+  * "aerial sunset Quito historic center Ecuador"
+  * "colorful street market Otavalo Ecuador"
+  * "Cotopaxi volcano morning clouds Ecuador"
+  * "colonial balcony flowers old town Quito"
+  * "ecuadorian food plate traditional restaurant"
 
-Return ONLY the search query, nothing else:"""
+Return ONLY the search query (3-5 keywords), nothing else:"""
     
     try:
         response = model.generate_content(prompt)
         query = response.text.strip()
         # Remove quotes if Gemini added them
         query = query.strip('"').strip("'")
+        print(f"   🎨 Generated diverse query: '{query}'")
         return query
     except Exception as e:
         print(f"⚠️ Could not generate image query: {e}")
-        return f"{location} cityscape"
+        # Fallback to varied pre-written queries
+        fallback_queries = [
+            "Quito colonial architecture sunset",
+            "Ecuador market colorful vendors",
+            "Cotopaxi volcano landscape",
+            "Quito old town aerial view",
+            "Ecuadorian traditional food",
+            "Quito street art murals",
+            "Ecuador cloud forest nature",
+            "Quito plaza San Francisco",
+            "Ecuador indigenous culture",
+            "Quito modern city skyline"
+        ]
+        return random.choice(fallback_queries)
 
 def generate_quito_content():
     """Generate interesting Quito content using Gemini"""
     
     # ENHANCED: Using system instruction for better grounding
     model = genai.GenerativeModel(
-        'gemini-3-flash-preview',
+        'gemini-2.5-flash',
         system_instruction="""You are a local expert living in Quito, ECUADOR (South America).
 
 CRITICAL GEOGRAPHIC CONTEXT:
@@ -266,9 +302,9 @@ Write only the post text, nothing else:"""
         if group_images:
             selected_image = get_unused_group_image(group_images)
             if selected_image:
-                print(f"   📸 Using group library image: {selected_image['post_message'][:50]}...")
+                print(f"   📸 Using group library image: {selected_image.get('post_message', 'N/A')[:50]}...")
                 # Add photo credit if description exists
-                if selected_image['post_message']:
+                if selected_image.get('post_message'):
                     cleaned_text += f"\n\n📸 {selected_image['post_message']}"
                 return cleaned_text, selected_image['url']
         
@@ -292,7 +328,7 @@ def generate_expat_meme():
     
     # ENHANCED: Using system instruction
     model = genai.GenerativeModel(
-        'gemini-3-flash-preview',
+        'gemini-2.5-flash',
         system_instruction="""You are an expat living in Quito, ECUADOR (South America).
 You share funny, relatable moments about expat life in Ecuador.
 Ecuador is in SOUTH AMERICA, not in Spain or Europe."""
@@ -341,9 +377,9 @@ Write only the post text, nothing else:"""
         if group_images:
             selected_image = get_unused_group_image(group_images)
             if selected_image:
-                print(f"   📸 Using group library image: {selected_image['post_message'][:50]}...")
+                print(f"   📸 Using group library image: {selected_image.get('post_message', 'N/A')[:50]}...")
                 # Add photo credit if description exists
-                if selected_image['post_message']:
+                if selected_image.get('post_message'):
                     cleaned_text += f"\n\n📸 {selected_image['post_message']}"
                 return cleaned_text, selected_image['url']
         
@@ -405,7 +441,7 @@ def translate_and_summarize_with_gemini(article):
     
     # ENHANCED: Using system instruction + grounding for geographic accuracy
     model = genai.GenerativeModel(
-        'gemini-3-flash-preview',
+        'gemini-2.5-flash',
         system_instruction="""You are a news translator for expats living in Quito, ECUADOR.
 
 CRITICAL GEOGRAPHIC KNOWLEDGE:
